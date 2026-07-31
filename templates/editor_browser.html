@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ dirname }}</title>
+  <style>
+    body { font-family: monospace; font-size: 14px; margin: 20px; }
+    header { font-family: sans-serif; margin-bottom: 15px; }
+    table { border-collapse: collapse; }
+    td { padding: 3px 15px 3px 0; white-space: nowrap; }
+    td.size { text-align: right; color: #666; }
+    td.date { color: #666; }
+    a { text-decoration: none; color: #06c; }
+    a.dir { font-weight: bold; color: #037; }
+    .binary { color: #b40; }
+    .broken { color: #999; font-style: italic; }
+    .special { color: #888; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <b>📁 {{ dirname }}/</b>
+    &nbsp;&nbsp;
+    {% if hidden %}
+      <a href="?path={{ dirname | urlencode }}">Скрыть скрытые</a>
+    {% else %}
+      <a href="?path={{ dirname | urlencode }}&hidden=true">Показать скрытые</a>
+    {% endif %}
+    &nbsp;&nbsp;<a href="logout">Выйти</a>
+  </header>
+  <table>
+    {% if parent is not none %}
+    <tr><td><a class="dir" href="?path={{ parent | urlencode }}{% if hidden %}&hidden=true{% endif %}">../</a></td><td></td><td></td></tr>
+    {% endif %}
+    {% for e in entries %}
+    <tr>
+      <td>
+        {% if e.broken %}
+          <span class="broken">{{ e.name }} (недоступен)</span>
+        {% elif e.is_special %}
+          <span class="special">{{ e.name }} (спец. файл, не открывается)</span>
+        {% elif e.is_dir %}
+          <a class="dir" href="?path={{ e.path | urlencode }}{% if hidden %}&hidden=true{% endif %}">{{ e.name }}</a>
+        {% elif e.is_binary %}
+          <span class="binary">{{ e.name }}</span>
+        {% else %}
+          <a href="?path={{ e.path | urlencode }}">{{ e.name }}</a>
+        {% endif %}
+      </td>
+      <td class="size">{{ e.size }}</td>
+      <td class="date">{{ e.mtime }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>

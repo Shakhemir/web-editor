@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>{{ filename }}</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    header, footer {
+      padding: 10px;
+      background: #f0f0f0;
+    }
+
+    textarea {
+      flex: 1;
+      width: 100%;
+      box-sizing: border-box;
+      resize: none;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 14px;
+      border: none;
+      border-top: 1px solid #ccc;
+    }
+
+    button {
+      margin-right: 10px;
+    }
+
+    #status { font-size: 14px; display: inline; margin-left: 10px; }
+    #dirty { color: #b40; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="?path={{ parent | urlencode }}">📁</a>
+    <b>{{ filename }}</b>&nbsp;&nbsp;
+    <button onclick="loadFile()">Загрузить</button>
+    <button onclick="saveFile()">Сохранить</button>
+    <span id="dirty"></span>
+    <span id="status">{{ comment }}</span>
+  </header>
+
+  <textarea id="editor"></textarea>
+
+  <script>
+    const filePath = `{{ filename }}`;
+    let loadedMtime = null;
+
+    async function loadFile() {
+      const res = await fetch(`load?path=${encodeURIComponent(filePath)}`);
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      document.getElementById('editor').value = data.content || '';
+      loadedMtime = data.mtime;
+      setDirty(false);
+    }
+
+    async function saveFile() {
+      const content = document.getElementById('editor').value;
+      const res = await fetch('save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: filePath, content, mtime: loadedMtime})
+      });
+      const result = await res.json();
+      if (result.status === 'ok') {
+        loadedMtime = result.mtime;
+        setDirty(false);
+        document.getElementById('status').textContent =
+          'Сохранено ' + new Date().toLocaleTimeString();
+      } else {
+        alert(result.error);
+      }
+    }
+
+    function setDirty(dirty) {
+      document.getElementById('dirty').textContent = dirty ? '● не сохранено' : '';
+    }
+
+    document.getElementById('editor').addEventListener('input', () => setDirty(true));
+
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        saveFile();
+      }
+    });
+
+    window.addEventListener('beforeunload', (e) => {
+      if (document.getElementById('dirty').textContent) e.preventDefault();
+    });
+
+    window.onload = loadFile;
+  </script>
+</body>
+</html>

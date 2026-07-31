@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход в редактор</title>
+  <style>
+    body { font-family: sans-serif; display: flex; justify-content: center;
+           align-items: center; height: 100vh; margin: 0; background: #f0f0f0; }
+    form { background: #fff; padding: 30px; border-radius: 8px;
+           box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+    input { padding: 8px; font-size: 15px; }
+    .error { color: #c00; font-size: 14px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <form method="post" action="">
+    <b>Редактор файлов</b><br><br>
+    <input type="password" name="password" placeholder="Пароль" autofocus>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit">Войти</button>
+    <div class="error">{{ error }}</div>
+  </form>
+</body>
+</html>

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Просмотр файла</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 10px;
+      background: #f0f3f0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    textarea {
+      flex: 1;
+      width: 100%;
+      box-sizing: border-box;
+      resize: none;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 14px;
+      border: none;
+      border-top: 1px solid #ccc;
+      background: #f3f3f3;
+    }
+
+    button {
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="?path={{ parent | urlencode }}">📁</a>
+    <button id="next-btn" onclick="loadNextFile()" style="display:none">◀️</button>
+    <b id="filename"></b>&nbsp;&nbsp;&nbsp;&nbsp;::&nbsp;&nbsp;&nbsp;&nbsp;
+    <button onclick="loadFile()">Обновить</button>
+    <a id="edit-link" href="#">✏️ Редактировать</a>
+    <div>{{ comment }}</div>
+  </header>
+
+  <textarea id="editor" readonly></textarea>
+
+</body>
+</html>
+<script>
+  let currentFilename = `{{ filename }}`;
+
+  function nextFilenameFor(name) {
+    const match = name.match(/^(.*)\.(\d+)$/);
+    if (match) {
+      // Было число в конце — увеличиваем
+      const base = match[1];
+      const num = parseInt(match[2], 10) + 1;
+      return `${base}.${num}`;
+    }
+    // Не было числа — добавляем .1
+    return `${name}.1`;
+  }
+
+  async function loadFile(filename = null) {
+    const url = `load?path=${filename || currentFilename}`;
+
+    const res = await fetch(url);
+    const data = await res.json();
+
+    document.getElementById('editor').value = data.content || '';
+    currentFilename = data.filename || filename || null;
+    document.getElementById('filename').innerHTML = currentFilename;
+    document.getElementById('edit-link').href =
+      `?path=${encodeURIComponent(currentFilename)}&edit=true`;
+
+    await updateNextButton();
+  }
+
+  async function updateNextButton() {
+    const btn = document.getElementById('next-btn');
+    if (!currentFilename) { btn.style.display = 'none'; return; }
+    const next = nextFilenameFor(currentFilename);
+    const res = await fetch(`exists?path=${encodeURIComponent(next)}`);
+    const data = await res.json();
+    btn.style.display = data.exists ? '' : 'none';
+  }
+
+  function loadNextFile() {
+    if (!currentFilename) {
+      alert("Сначала загрузите файл");
+      return;
+    }
+    loadFile(nextFilenameFor(currentFilename));
+  }
+
+  window.onload = () => loadFile();
+</script>
