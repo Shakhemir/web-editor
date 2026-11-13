@@ -14,9 +14,107 @@
     a { text-decoration: none; color: #06c; }
     a.dir { font-weight: bold; color: #037; }
     .binary { color: #b40; }
+    .sqlite { color: #087; }
     .broken { color: #999; font-style: italic; }
     .special { color: #888; }
     a:hover { text-decoration: underline; }
+
+    #shell {
+      margin-top: 25px;
+      padding-top: 15px;
+      border-top: 1px solid #ddd;
+    }
+    #shell-form { display: flex; gap: 8px; align-items: center; max-width: 900px; }
+    #shell-prompt { color: #037; font-weight: bold; }
+    #shell-input-wrap { position: relative; flex: 1; }
+    #shell-cmd {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: monospace;
+      font-size: 14px;
+      padding: 6px 8px;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+    }
+    #shell-suggest {
+      display: none;
+      position: absolute;
+      top: 100%; left: 0; right: 0;
+      margin: 2px 0 0; padding: 0;
+      list-style: none;
+      background: #fff;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.12);
+      max-height: 240px; overflow-y: auto;
+      z-index: 10;
+      font-family: monospace; font-size: 13px;
+    }
+    #shell-suggest li {
+      padding: 5px 10px; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #shell-suggest li.active, #shell-suggest li:hover { background: #eef3f8; }
+    #shell-run, #shell-stream, #shell-stop {
+      font-family: sans-serif;
+      font-size: 14px;
+      padding: 6px 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #shell-run:disabled, #shell-stream:disabled { opacity: .5; cursor: default; }
+    #shell-stop { color: #b40; }
+    #shell-hint {
+      margin-top: 6px;
+      font-family: sans-serif;
+      font-size: 11px;
+      color: #999;
+      max-width: 900px;
+    }
+    #shell-output {
+      display: none;
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: #1e1e1e;
+      color: #e0e0e0;
+      border-radius: 4px;
+      white-space: pre;          /* не переносить строки — широкий вывод скроллится */
+      font-size: 13px;
+      line-height: 1.4;
+      min-width: 320px;
+      max-width: 100%;
+      max-height: 60vh;
+      overflow: auto;            /* горизонтальный + вертикальный скролл */
+      resize: horizontal;        /* контейнер можно тянуть за правый-нижний угол */
+    }
+    #shell-output .meta { color: #6a9955; }
+    #shell-output .err { color: #f28b82; }
+
+    #upload {
+      margin-top: 20px;
+      padding-top: 15px;
+      border-top: 1px solid #ddd;
+    }
+    #upload-form {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      max-width: 900px;
+    }
+    #upload-label { font-family: sans-serif; color: #037; font-weight: bold; }
+    #upload-input { font-family: sans-serif; font-size: 13px; }
+    #upload-btn {
+      font-family: sans-serif;
+      font-size: 14px;
+      padding: 6px 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #upload-btn:disabled { opacity: .5; cursor: default; }
+    #upload-status { font-family: sans-serif; font-size: 13px; }
+    #upload-status.ok { color: #2a7; }
+    #upload-status.err { color: #b40; }
   </style>
 </head>
 <body>
@@ -43,8 +141,10 @@
           <span class="special">{{ e.name }} (спец. файл, не открывается)</span>
         {% elif e.is_dir %}
           <a class="dir" href="?path={{ e.path | urlencode }}{% if hidden %}&hidden=true{% endif %}">{{ e.name }}</a>
+        {% elif e.is_sqlite %}
+          <a class="sqlite" href="?path={{ e.path | urlencode }}" title="Открыть базу SQLite">🗄 {{ e.name }}</a>
         {% elif e.is_binary %}
-          <span class="binary">{{ e.name }}</span>
+          <a class="binary" href="download?path={{ e.path | urlencode }}" target="_blank" rel="noopener" title="Открыть / скачать">{{ e.name }}</a>
         {% else %}
           <a href="?path={{ e.path | urlencode }}">{{ e.name }}</a>
         {% endif %}
@@ -54,5 +154,320 @@
     </tr>
     {% endfor %}
   </table>
+
+  <div id="shell">
+    <form id="shell-form" onsubmit="return runCommand(event)">
+      <span id="shell-prompt">$</span>
+      <div id="shell-input-wrap">
+        <input id="shell-cmd" type="text" autocomplete="off" autocapitalize="off"
+               spellcheck="false" placeholder="команда для выполнения в этой папке, например: ls -al">
+        <ul id="shell-suggest"></ul>
+      </div>
+      <button id="shell-run" type="submit">Выполнить</button>
+      <button id="shell-stream" type="button" onclick="startStream()">▶ Логи</button>
+      <button id="shell-stop" type="button" onclick="stopStream()" style="display:none">⏹ Стоп</button>
+    </form>
+    <div id="shell-hint">
+      Кнопка «▶ Логи» — потоковый вывод команды в реальном времени (tail -f,
+      journalctl -f, docker logs -f), «⏹ Стоп» останавливает и убивает процесс.
+      Разрешены перезагрузка (reboot) и systemctl restart. Заблокированы:
+      полное выключение (poweroff/halt/shutdown), форматирование/затирание
+      дисков (mkfs, dd, wipefs…), fork bomb, рекурсивное rm/chmod/chown над
+      системными каталогами.
+      <br>
+      История выполненных команд хранится в этом браузере; по мере ввода
+      появляются подсказки (↑/↓ — выбор, Enter/Tab — подставить, Esc — скрыть).
+      <a href="#" onclick="clearHistory(); return false;">Очистить историю</a>
+    </div>
+    <div id="shell-output"></div>
+  </div>
+
+  <div id="upload">
+    <form id="upload-form" onsubmit="return uploadFile(event)">
+      <span id="upload-label">⬆ Загрузить файл в эту папку:</span>
+      <input id="upload-input" type="file" required>
+      <button id="upload-btn" type="submit">Загрузить</button>
+      <span id="upload-status"></span>
+    </form>
+  </div>
+
+<script>
+  const SHELL_CWD = {{ dirname | tojson }};
+  let es = null;  // активный EventSource (поток логов)
+
+  // ----- локальная история команд + автоподсказки (localStorage, на этот браузер) -----
+  const HISTORY_KEY = 'editor_shell_history';
+  const HISTORY_MAX = 200;   // сколько команд храним
+  const SUGGEST_MAX = 8;     // сколько подсказок показываем одновременно
+  let suggestItems = [];     // текущий отфильтрованный список подсказок
+  let suggestActive = -1;    // индекс выделенной подсказки (-1 = ничего не выбрано)
+
+  function loadHistory() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Сохраняем выполненную команду: убираем дубликат, ставим в начало, режем по лимиту
+  function saveCommand(cmd) {
+    cmd = (cmd || '').trim();
+    if (!cmd) return;
+    let hist = loadHistory().filter(c => c !== cmd);
+    hist.unshift(cmd);
+    if (hist.length > HISTORY_MAX) hist = hist.slice(0, HISTORY_MAX);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(hist)); } catch (e) {}
+  }
+
+  function clearHistory() {
+    if (!confirm('Очистить локальную историю команд в этом браузере?')) return;
+    try { localStorage.removeItem(HISTORY_KEY); } catch (e) {}
+    hideSuggest();
+  }
+
+  // Похожие команды: сначала начинающиеся с введённого текста, затем содержащие его
+  function matchHistory(text) {
+    const q = text.trim().toLowerCase();
+    if (!q) return [];
+    const starts = [], contains = [];
+    for (const c of loadHistory()) {
+      const lc = c.toLowerCase();
+      if (lc === q) continue;                 // точное совпадение подсказывать незачем
+      if (lc.startsWith(q)) starts.push(c);
+      else if (lc.includes(q)) contains.push(c);
+    }
+    return starts.concat(contains).slice(0, SUGGEST_MAX);
+  }
+
+  function hideSuggest() {
+    const box = document.getElementById('shell-suggest');
+    box.style.display = 'none';
+    box.innerHTML = '';
+    suggestItems = [];
+    suggestActive = -1;
+  }
+
+  function isSuggestOpen() {
+    return document.getElementById('shell-suggest').style.display === 'block' && suggestItems.length > 0;
+  }
+
+  function renderSuggest(text) {
+    const box = document.getElementById('shell-suggest');
+    suggestItems = matchHistory(text);
+    suggestActive = -1;
+    if (!suggestItems.length) { hideSuggest(); return; }
+    box.innerHTML = '';
+    suggestItems.forEach((cmd, i) => {
+      const li = document.createElement('li');
+      li.textContent = cmd;
+      // mousedown (не click) — срабатывает до blur поля, иначе список успеет скрыться
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); applySuggest(i); });
+      box.appendChild(li);
+    });
+    box.style.display = 'block';
+  }
+
+  function highlightSuggest() {
+    const box = document.getElementById('shell-suggest');
+    [...box.children].forEach((li, i) => li.classList.toggle('active', i === suggestActive));
+    if (suggestActive >= 0) box.children[suggestActive].scrollIntoView({ block: 'nearest' });
+  }
+
+  function applySuggest(i) {
+    const input = document.getElementById('shell-cmd');
+    input.value = suggestItems[i];
+    hideSuggest();
+    input.focus();
+  }
+
+  (function initSuggest() {
+    const input = document.getElementById('shell-cmd');
+    input.addEventListener('input', () => renderSuggest(input.value));
+    input.addEventListener('focus', () => { if (input.value.trim()) renderSuggest(input.value); });
+    input.addEventListener('blur', () => setTimeout(hideSuggest, 120));  // успеть поймать клик по подсказке
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        if (!isSuggestOpen()) { renderSuggest(input.value); if (!suggestItems.length) return; }
+        e.preventDefault();
+        suggestActive = Math.min(suggestActive + 1, suggestItems.length - 1);
+        highlightSuggest();
+      } else if (e.key === 'ArrowUp') {
+        if (!isSuggestOpen()) return;
+        e.preventDefault();
+        suggestActive = Math.max(suggestActive - 1, 0);
+        highlightSuggest();
+      } else if (e.key === 'Tab') {
+        if (isSuggestOpen()) { e.preventDefault(); applySuggest(suggestActive >= 0 ? suggestActive : 0); }
+      } else if (e.key === 'Enter') {
+        if (isSuggestOpen() && suggestActive >= 0) {
+          e.preventDefault();   // подставляем подсказку вместо запуска команды
+          applySuggest(suggestActive);
+        } else {
+          hideSuggest();        // Enter без выбора — обычный запуск
+        }
+      } else if (e.key === 'Escape') {
+        if (isSuggestOpen()) { e.preventDefault(); hideSuggest(); }
+      }
+    });
+  })();
+
+  // Добавить строку в контейнер вывода; автоскролл вниз, если пользователь у края
+  function appendOutput(text, cls) {
+    const out = document.getElementById('shell-output');
+    const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+    const div = document.createElement('div');
+    if (cls) div.className = cls;
+    div.textContent = text;
+    out.appendChild(div);
+    if (atBottom) out.scrollTop = out.scrollHeight;
+  }
+
+  function setStreaming(active) {
+    document.getElementById('shell-stop').style.display = active ? '' : 'none';
+    document.getElementById('shell-stream').disabled = active;
+    document.getElementById('shell-run').disabled = active;
+  }
+
+  // Остановить поток: закрытие EventSource рвёт соединение, сервер это ловит
+  // (is_disconnected / упавший heartbeat) и убивает процесс.
+  function stopStream() {
+    if (es) { es.close(); es = null; }
+    setStreaming(false);
+  }
+
+  function startStream() {
+    const input = document.getElementById('shell-cmd');
+    const out = document.getElementById('shell-output');
+    const command = input.value.trim();
+    if (!command) return;
+    saveCommand(command);
+    hideSuggest();
+    stopStream();
+    out.style.display = 'block';
+    out.innerHTML = '';
+    setStreaming(true);
+
+    const url = `stream?cmd=${encodeURIComponent(command)}&cwd=${encodeURIComponent(SHELL_CWD)}`;
+    es = new EventSource(url);
+    es.addEventListener('meta', (e) => appendOutput(e.data, 'meta'));
+    es.onmessage = (e) => appendOutput(e.data);
+    es.addEventListener('end', (e) => {
+      appendOutput(e.data || '[поток завершён]', 'meta');
+      stopStream();
+    });
+    es.onerror = () => {
+      // разрыв, закрытие сервером или ошибка авторизации; не даём переподключаться
+      if (es) appendOutput('[соединение прервано]', 'err');
+      stopStream();
+    };
+  }
+
+  async function runCommand(event) {
+    event.preventDefault();
+    stopStream();  // одиночная команда и поток не должны идти одновременно
+    const input = document.getElementById('shell-cmd');
+    const btn = document.getElementById('shell-run');
+    const out = document.getElementById('shell-output');
+    const command = input.value.trim();
+    if (!command) return false;
+    saveCommand(command);
+    hideSuggest();
+
+    btn.disabled = true;
+    out.style.display = 'block';
+    out.textContent = '⏳ Выполняется…';
+
+    try {
+      const res = await fetch('exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command, cwd: SHELL_CWD }),
+      });
+      const data = await res.json();
+      out.innerHTML = '';
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `$ ${command}   (${data.cwd || SHELL_CWD})`;
+      out.appendChild(meta);
+
+      const body = document.createElement('div');
+      if (!res.ok || data.error) {
+        body.className = 'err';
+        body.textContent = data.error || `Ошибка (HTTP ${res.status})`;
+      } else {
+        body.textContent = data.output || '(нет вывода)';
+        if (data.returncode !== 0) {
+          const code = document.createElement('div');
+          code.className = 'err';
+          code.textContent = `[код возврата: ${data.returncode}]`;
+          out.appendChild(body);
+          out.appendChild(code);
+          btn.disabled = false;
+          input.focus();
+          return false;
+        }
+      }
+      out.appendChild(body);
+    } catch (e) {
+      out.textContent = 'Сбой запроса: ' + e;
+    } finally {
+      btn.disabled = false;
+      input.focus();
+    }
+    return false;
+  }
+
+  async function uploadFile(event, overwrite) {
+    event.preventDefault();
+    const input = document.getElementById('upload-input');
+    const btn = document.getElementById('upload-btn');
+    const status = document.getElementById('upload-status');
+    const file = input.files[0];
+    if (!file) return false;
+
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('dir', SHELL_CWD);
+    if (overwrite) fd.append('overwrite', 'true');
+
+    btn.disabled = true;
+    status.className = '';
+    status.textContent = '⏳ Загрузка…';
+
+    try {
+      const res = await fetch('upload', { method: 'POST', body: fd });
+      const data = await res.json();
+
+      if (res.status === 409 && data.exists) {
+        status.className = '';
+        status.textContent = '';
+        if (confirm(data.error)) {
+          btn.disabled = false;
+          return uploadFile(event, true);
+        }
+        status.textContent = 'Отменено';
+        return false;
+      }
+      if (!res.ok || data.error) {
+        status.className = 'err';
+        status.textContent = data.error || `Ошибка (HTTP ${res.status})`;
+        return false;
+      }
+      status.className = 'ok';
+      status.textContent = `✓ Загружено: ${data.name}`;
+      // Обновляем список файлов, чтобы показать загруженный файл
+      setTimeout(() => location.reload(), 600);
+    } catch (e) {
+      status.className = 'err';
+      status.textContent = 'Сбой запроса: ' + e;
+    } finally {
+      btn.disabled = false;
+    }
+    return false;
+  }
+</script>
 </body>
 </html>
